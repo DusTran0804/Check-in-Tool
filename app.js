@@ -1,12 +1,12 @@
 /**
- * Face Check-in Web App Logic
- * Powered by face-api.js
+ * Face Check-in Web App Logic (Backend Driven API Version)
  */
 
 const video = document.getElementById('video');
 const overlay = document.getElementById('overlay');
 const registerBtn = document.getElementById('register-btn');
 const resetBtn = document.getElementById('reset-session-btn');
+const manualCheckinBtn = document.getElementById('manual-checkin-btn');
 const userNameInput = document.getElementById('user-name');
 const statusBadge = document.getElementById('ai-status');
 const loader = document.getElementById('loader-wrapper');
@@ -15,56 +15,38 @@ const checkinPanel = document.getElementById('checkin-panel');
 const currentUserDisplay = document.getElementById('current-user-display');
 const logContainer = document.getElementById('checkin-logs');
 const flashOverlay = document.getElementById('capture-flash');
+const forceStartBtn = document.getElementById('force-start-btn');
 
-let isModelLoaded = false;
-let isRegistered = false;
-let registeredDescriptor = null;
-let registeredName = "";
+// PRODUCTION: Đổi dòng dưới thành link Render của bạn (VD: "https://face-checkin-backend.onrender.com/api")
+let backendUrl = "https://face-checkin-backend.onrender.com/api"; 
+// LOCAL DEV: let backendUrl = "http://localhost:8000/api";
+let currentSessionId = null;
+let currentRegisteredName = "";
 let checkinCount = 0;
-let lastCheckinTime = 0;
-const CHECKIN_COOLDOWN = 5000; // 5 seconds cooldown between check-ins (reduced for easier testing)
+let checkinCooldown = false;
 
-const MODEL_URL = './models';
-
-document.getElementById('force-start-btn').addEventListener('click', () => {
+// Remove logic related to models
+forceStartBtn.addEventListener('click', () => {
     loader.style.opacity = '0';
     setTimeout(() => loader.style.display = 'none', 500);
     startVideo();
 });
 
-async function init() {
-    try {
-        console.log("Loading models...");
-        statusBadge.textContent = "AI Status: Loading Models...";
-        
-        // Load required models
-        await Promise.all([
-            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-            faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
-        ]);
-
-        isModelLoaded = true;
-        console.log("Models loaded successfully");
-        statusBadge.textContent = "AI Status: Models Ready";
-        loader.style.opacity = '0';
-        setTimeout(() => loader.style.display = 'none', 500);
-
-        startVideo();
-    } catch (err) {
-        console.error("Error loading models:", err);
-        statusBadge.textContent = "AI Status: Load Error: " + err.message;
-        document.getElementById('loader-text').textContent = "Lỗi tải AI: " + err.message;
-        document.getElementById('force-start-btn').style.display = 'inline-block';
-    }
+// Start immediately without waiting for models
+function init() {
+    console.log("Khởi động Camera (Backend Mode)...");
+    loader.style.opacity = '0';
+    setTimeout(() => loader.style.display = 'none', 500);
+    statusBadge.textContent = "AI Status: Kết nối máy chủ...";
+    startVideo();
 }
 
 function startVideo() {
-    navigator.mediaDevices.getUserMedia({ video: {} })
+    navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } })
         .then(stream => {
             video.srcObject = stream;
-            // Force play for Safari
             video.play().catch(e => console.error("Play error:", e));
+            statusBadge.textContent = "AI Status: Camera Sẵn sàng";
         })
         .catch(err => {
             console.error("Error accessing camera:", err);
@@ -72,71 +54,89 @@ function startVideo() {
         });
 }
 
+function captureFrame() {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function clearOverlay() {
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+}
+
+// Chạy vòng lặp tự động gửi ảnh lên server để liên tục lấy vị trí hộp thoại
+// Cẩn thận: Việc này sẽ spam server rất nhiều nếu gọi mỗi 100ms.
+// Sẽ để 500ms mỗi khung hình.
 video.addEventListener('play', () => {
-    const canvas = faceapi.createCanvasFromMedia(video);
-    // Use the container sizing
-    const displaySize = { width: video.clientWidth, height: video.clientHeight };
-    faceapi.matchDimensions(overlay, displaySize);
-
+    // Match overlay dimensions
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+    
+    // Setup matching window dimensions based on CSS display size later
     setInterval(async () => {
-        if (!isModelLoaded) return;
-        
-        try {
-            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-                .withFaceLandmarks()
-                .withFaceDescriptors();
+        if (!currentSessionId) {
+            clearOverlay();
+            return;
+        }
 
-            const resizedDetections = faceapi.resizeResults(detections, displaySize);
-            
-            // Clear canvas
+        const base64Img = captureFrame();
+        try {
+            const resp = await fetch(`${backendUrl}/checkin`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    session_id: currentSessionId,
+                    image_base64: base64Img
+                })
+            });
+
+            if (!resp.ok) {
+                if (resp.status === 401) {
+                    showToast("Phiên làm việc hết hạn máy chủ. Xin đăng ký lại", "error");
+                    resetSession();
+                }
+                return;
+            }
+
+            const data = await resp.json();
             const ctx = overlay.getContext('2d');
             ctx.clearRect(0, 0, overlay.width, overlay.height);
-            
-            if (isRegistered && registeredDescriptor) {
-                const faceMatcher = new faceapi.FaceMatcher(
-                    new faceapi.LabeledFaceDescriptors(registeredName, [registeredDescriptor]),
-                    0.6 // increased distance threshold to 0.6
-                );
 
-                resizedDetections.forEach(detection => {
-                    const result = faceMatcher.findBestMatch(detection.descriptor);
-                    const { x, y, width, height } = detection.detection.box;
-                    
-                    let color = '#e74c3c'; // red for unknown
-                    let label = `Unknown (${result.distance.toFixed(2)})`;
+            // Tỷ lệ scale:
+            const displaySize = { width: video.clientWidth, height: video.clientHeight };
+            const scaleX = displaySize.width / video.videoWidth;
+            const scaleY = displaySize.height / video.videoHeight;
 
-                    if (result.label !== 'unknown') {
-                        color = '#2ecc71'; // green for match
-                        label = `${registeredName} (${result.distance.toFixed(2)})`;
-                        // Auto background check is disabled so the button is the main way to log!
-                        // Nhưng vẫn sẽ thả đèn xanh để user biết máy quay đã nhận ra
-                    }
+            data.faces.forEach(face => {
+                const x = face.box.x * scaleX;
+                const y = face.box.y * scaleY;
+                const w = face.box.width * scaleX;
+                const h = face.box.height * scaleY;
 
-                    // Draw custom box
-                    ctx.strokeStyle = color;
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(x, y, width, height);
-                    
-                    // Label box
-                    ctx.fillStyle = color;
-                    const textWidth = ctx.measureText(label).width;
-                    ctx.fillRect(x, y - 25, textWidth + 20, 25);
-                    ctx.fillStyle = "#fff";
-                    ctx.fillText(label, x + 10, y - 8);
-                });
-            } else {
-                resizedDetections.forEach(detection => {
-                    const { x, y, width, height } = detection.detection.box;
-                    ctx.strokeStyle = '#00d2ff';
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(x, y, width, height);
-                });
-            }
-        } catch (err) {
-            console.error("Interval Error:", err);
-            // Optionally flash red to show the loop crashed
+                let color = face.match ? '#2ecc71' : '#e74c3c';
+                let label = `${face.label} (${face.distance.toFixed(2)})`;
+
+                // Draw custom box
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x, y, w, h);
+                
+                // Label box
+                ctx.fillStyle = color;
+                const textWidth = ctx.measureText(label).width;
+                ctx.fillRect(x, y - 25, textWidth + 20, 25);
+                ctx.fillStyle = "#fff";
+                ctx.fillText(label, x + 10, y - 8);
+            });
+
+        } catch (error) {
+            console.error("Lỗi giao tiếp máy chủ:", error);
         }
-    }, 150);
+    }, 1000); // Gửi 1 hình / 1 giây để bảo vệ server Render
 });
 
 registerBtn.addEventListener('click', async () => {
@@ -146,115 +146,133 @@ registerBtn.addEventListener('click', async () => {
         return;
     }
 
-    statusBadge.textContent = "AI Status: Đang nhận diện...";
-    
-    // Attempt to capture a face
-    const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
+    statusBadge.textContent = "AI Status: Đang mã hóa...";
+    const base64Img = captureFrame();
 
-    if (detection) {
-        // Successful registration
-        registeredDescriptor = detection.descriptor;
-        registeredName = name.toUpperCase();
-        isRegistered = true;
-        
-        // Flash animation
-        flashOverlay.classList.add('active');
-        setTimeout(() => flashOverlay.classList.remove('active'), 500);
+    try {
+        const resp = await fetch(`${backendUrl}/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name: name,
+                image_base64: base64Img
+            })
+        });
 
-        // Update UI
-        registrationPanel.classList.add('hidden');
-        checkinPanel.classList.remove('hidden');
-        currentUserDisplay.textContent = registeredName;
-        statusBadge.textContent = "AI Status: Đang Check-in";
+        const data = await resp.json();
         
-        showToast(`Đăng ký thành công: ${registeredName}`);
-    } else {
-        showToast("Không tìm thấy khuôn mặt. Vui lòng nhìn vào camera.", "error");
-        statusBadge.textContent = "AI Status: Models Ready";
+        if (resp.ok) {
+            currentSessionId = data.session_id;
+            currentRegisteredName = data.name;
+            
+            // Flash animation
+            flashOverlay.classList.add('active');
+            setTimeout(() => flashOverlay.classList.remove('active'), 500);
+
+            // Update UI
+            registrationPanel.classList.add('hidden');
+            checkinPanel.classList.remove('hidden');
+            currentUserDisplay.textContent = currentRegisteredName;
+            statusBadge.textContent = "AI Status: Máy chủ đang theo dõi";
+            
+            showToast(`Đăng ký trên máy chủ thành công: ${currentRegisteredName}`);
+        } else {
+            showToast(data.detail || "Lỗi khi đăng ký.", "error");
+            statusBadge.textContent = "AI Status: Camera Sẵn sàng";
+        }
+    } catch (error) {
+        showToast("Không thể kết nối máy chủ Python.", "error");
+        statusBadge.textContent = "AI Status: Camera Sẵn sàng";
     }
 });
 
-resetBtn.addEventListener('click', () => {
-    isRegistered = false;
-    registeredDescriptor = null;
-    registeredName = "";
+manualCheckinBtn.addEventListener('click', async () => {
+    if (!currentSessionId) return;
+    
+    if (checkinCooldown) {
+        showToast("Vui lòng đợi vài giây để checkin lại", "error");
+        return;
+    }
+
+    statusBadge.textContent = "AI Status: Xác thực thủ công...";
+    const base64Img = captureFrame();
+
+    try {
+        const resp = await fetch(`${backendUrl}/checkin`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: currentSessionId,
+                image_base64: base64Img
+            })
+        });
+
+        const data = await resp.json();
+        
+        if (resp.ok && data.faces && data.faces.length > 0) {
+            // Find if any face matches
+            const matchFace = data.faces.find(f => f.match);
+            if (matchFace) {
+                checkinCount++;
+        
+                const timeStr = new Date().toLocaleTimeString();
+                const logItem = document.createElement('div');
+                logItem.className = 'log-item';
+                logItem.innerHTML = `
+                    <span class="log-name">✅ ${matchFace.label} check-in lần ${checkinCount} (Server)</span>
+                    <span class="log-time">${timeStr}</span>
+                `;
+                
+                const empty = logContainer.querySelector('.empty-log');
+                if (empty) empty.remove();
+                
+                logContainer.prepend(logItem);
+                showToast(`Check-in thành công: ${matchFace.label} (Lần ${checkinCount})`);
+                
+                flashOverlay.style.background = '#2ecc71';
+                flashOverlay.classList.add('active');
+                setTimeout(() => {
+                    flashOverlay.classList.remove('active');
+                    flashOverlay.style.background = '#fff';
+                }, 500);
+
+                try {
+                    const speech = new SpeechSynthesisUtterance(`${matchFace.label} đã check in thành công`);
+                    speech.lang = 'vi-VN';
+                    window.speechSynthesis.speak(speech);
+                } catch(e) {}
+                
+                checkinCooldown = true;
+                setTimeout(() => checkinCooldown = false, 3000);
+
+            } else {
+                showToast(`Mặt không khớp. Không phải bạn!`, "error");
+            }
+        } else {
+            showToast("Máy chủ không tìm thấy khuôn mặt trong Camera.", "error");
+        }
+    } catch(err) {
+        showToast("API Checkin lỗi: " + err, "error");
+    }
+    statusBadge.textContent = "AI Status: Máy chủ đang theo dõi";
+});
+
+function resetSession() {
+    currentSessionId = null;
+    currentRegisteredName = "";
     checkinCount = 0;
     registrationPanel.classList.remove('hidden');
     checkinPanel.classList.add('hidden');
     
-    // Clear logs
     logContainer.innerHTML = '<div class="empty-log">Chưa có lượt check-in nào trong phiên này.</div>';
-    
-    statusBadge.textContent = "AI Status: Models Ready";
-    showToast("Đã xóa phiên làm việc. Vui lòng đăng ký lại.");
-});
-
-document.getElementById('manual-checkin-btn').addEventListener('click', async () => {
-    if (!isRegistered || !registeredDescriptor) return;
-    
-    statusBadge.textContent = "AI Status: Kiểm tra...";
-    const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceDescriptor();
-
-    if (detection) {
-        const faceMatcher = new faceapi.FaceMatcher(
-            new faceapi.LabeledFaceDescriptors(registeredName, [registeredDescriptor]),
-            0.6
-        );
-        const result = faceMatcher.findBestMatch(detection.descriptor);
-        
-        if (result.label !== 'unknown') {
-            handleCheckin(registeredName, true); // Force bypass cooldown
-        } else {
-            showToast(`Mặt không khớp (${result.distance.toFixed(2)}). Không phải bạn!`, "error");
-        }
-    } else {
-        showToast("Không nhìn thấy khuôn mặt. Hãy nhìn thẳng vào camera.", "error");
-    }
-    statusBadge.textContent = "AI Status: Models Ready";
-});
-
-function handleCheckin(name, force = false) {
-    const now = Date.now();
-    if (force || now - lastCheckinTime > CHECKIN_COOLDOWN) {
-        lastCheckinTime = now;
-        checkinCount++;
-        
-        // Log entry
-        const timeStr = new Date().toLocaleTimeString();
-        const logItem = document.createElement('div');
-        logItem.className = 'log-item';
-        logItem.innerHTML = `
-            <span class="log-name">✅ ${name} check-in lần ${checkinCount}</span>
-            <span class="log-time">${timeStr}</span>
-        `;
-        
-        // Remove empty state if present
-        const empty = logContainer.querySelector('.empty-log');
-        if (empty) empty.remove();
-        
-        logContainer.prepend(logItem);
-        showToast(`Check-in thành công: ${name} (Lần ${checkinCount})`);
-        
-        // Flash overlay for check-in
-        flashOverlay.style.background = '#2ecc71';
-        flashOverlay.classList.add('active');
-        setTimeout(() => {
-            flashOverlay.classList.remove('active');
-            flashOverlay.style.background = '#fff';
-        }, 500);
-        
-        // Audio feedback (optional, async so it doesn't block)
-        try {
-            const speech = new SpeechSynthesisUtterance(`${name} đã check in thành công`);
-            speech.lang = 'vi-VN';
-            window.speechSynthesis.speak(speech);
-        } catch(e) {}
-    }
+    statusBadge.textContent = "AI Status: Camera Sẵn sàng";
+    clearOverlay();
 }
+
+resetBtn.addEventListener('click', () => {
+    resetSession();
+    showToast("Đã xóa phiên làm việc khỏi Web. Đang đợi đăng ký lại.");
+});
 
 function showToast(message, type = 'success') {
     const toast = document.createElement('div');
