@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Check-in | Modern AI Attendance</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-mode">
+    <div id="loader-wrapper">
+        <div class="loader"></div>
+        <p id="loader-text">Đang tải mô hình AI...</p>
+        <button id="force-start-btn" class="btn btn-outline" style="display: none; margin-top: 20px;">Bỏ qua lỗi và thử bật Camera</button>
+    </div>
+
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="pulse"></span>
+                <h1>FACE<span>CHECKIN</span></h1>
+            </div>
+            <div class="status-badge" id="ai-status">AI Status: Waiting</div>
+        </header>
+
+        <main>
+            <div class="video-section">
+                <div class="video-container">
+                    <video id="video" autoplay muted playsinline></video>
+                    <canvas id="overlay"></canvas>
+                    <div class="scan-line"></div>
+                    
+                    <!-- Feedback Overlay -->
+                    <div id="capture-flash" class="flash"></div>
+                </div>
+            </div>
+
+            <div class="controls-section">
+                <div class="card glass">
+                    <div class="card-header">
+                        <h2>Hành động</h2>
+                    </div>
+                    <div class="card-body">
+                        <div id="registration-panel">
+                            <p class="hint">Đăng ký khuôn mặt của bạn để bắt đầu phiên làm việc.</p>
+                            <input type="text" id="user-name" placeholder="Nhập tên của bạn..." class="input-modern">
+                            <button id="register-btn" class="btn btn-primary">
+                                <span class="icon">📸</span> Đăng ký khuôn mặt
+                            </button>
+                        </div>
+                        
+                        <div id="checkin-panel" class="hidden">
+                            <div class="user-info">
+                                <span class="label">Chào mừng,</span>
+                                <span id="current-user-display" class="highlight">Người dùng</span>
+                            </div>
+                            <button id="manual-checkin-btn" class="btn btn-primary" style="margin-bottom: 15px;">
+                                📸 Check-in Ngay
+                            </button>
+                            <button id="reset-session-btn" class="btn btn-outline">
+                                ↺ Đăng ký lại tài khoản khác
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card glass log-container">
+                    <div class="card-header">
+                        <h2>Lịch sử Check-in</h2>
+                    </div>
+                    <div id="checkin-logs" class="logs scrollbar">
+                        <div class="empty-log">Chưa có lượt check-in nào trong phiên này.</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2026 Face Checkin Web App - AI Powered</p>
+        </footer>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast-container"></div>
+    
+    <script src="face-api.min.js"></script>
+    <script src="app.js?v=8"></script>
+</body>
+</html>
