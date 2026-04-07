@@ -18,6 +18,4 @@ services:
   - type: web
     name: face-checkin-frontend
     env: static
-    region: singapore
-    buildCommand: ""
-    staticPublishPath: "./"
+    staticPublishPath: "."
