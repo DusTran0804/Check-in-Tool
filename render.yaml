@@ -9,4 +9,8 @@ services:
     plan: free
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.0
+        value: 3.10.12
+      - key: CMAKE_BUILD_PARALLEL_LEVEL
+        value: "1"
+      - key: MAX_JOBS
+        value: "1"
