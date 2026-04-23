@@ -17,7 +17,6 @@ const logContainer = document.getElementById('checkin-logs');
 const flashOverlay = document.getElementById('capture-flash');
 const forceStartBtn = document.getElementById('force-start-btn');
 
-// PRODUCTION: Đổi dòng dưới thành link Render của bạn (VD: "https://face-checkin-backend.onrender.com/api")
 let backendUrl = "https://face-checkin-backend.onrender.com/api"; 
 // LOCAL DEV: let backendUrl = "http://localhost:8000/api";
 let currentSessionId = null;
@@ -68,9 +67,6 @@ function clearOverlay() {
     ctx.clearRect(0, 0, overlay.width, overlay.height);
 }
 
-// Chạy vòng lặp tự động gửi ảnh lên server để liên tục lấy vị trí hộp thoại
-// Cẩn thận: Việc này sẽ spam server rất nhiều nếu gọi mỗi 100ms.
-// Sẽ để 500ms mỗi khung hình.
 video.addEventListener('play', () => {
     // Match overlay dimensions
     overlay.width = video.videoWidth;
@@ -136,7 +132,7 @@ video.addEventListener('play', () => {
         } catch (error) {
             console.error("Lỗi giao tiếp máy chủ:", error);
         }
-    }, 1000); // Gửi 1 hình / 1 giây để bảo vệ server Render
+    }, 1000); 
 });
 
 registerBtn.addEventListener('click', async () => {
