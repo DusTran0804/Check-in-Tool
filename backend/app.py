@@ -9,7 +9,6 @@ import face_recognition
 
 app = FastAPI()
 
-# Bật tính năng CORS để web app có thể truyền ảnh sang
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,8 +17,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Bộ nhớ tạm lưu lại face_encoding theo ID Session người dùng
-# Có cấu trúc: { "session_id": { "name": "...", "encoding": [...] } }
 sessions = {}
 
 def decode_base64_img(base64_str):
@@ -65,7 +62,6 @@ def checkin_face(req: CheckinRequest):
     stored_name = sessions[req.session_id]["name"]
     
     img = decode_base64_img(req.image_base64)
-    # Thu nhỏ 1/4 để xử lý siêu tốc độ giống code gốc của bạn
     small_img = cv2.resize(img, (0, 0), fx=0.25, fy=0.25)
     
     face_locations = face_recognition.face_locations(small_img)
@@ -73,7 +69,6 @@ def checkin_face(req: CheckinRequest):
     
     results = []
     for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-        # Trả tọa độ về tỷ lệ ban đầu
         top, right, bottom, left = top*4, right*4, bottom*4, left*4
         
         matches = face_recognition.compare_faces([stored_encoding], face_encoding, tolerance=0.5)
@@ -94,5 +89,4 @@ def checkin_face(req: CheckinRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    # Mở port 8000
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
